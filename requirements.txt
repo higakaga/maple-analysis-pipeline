@@ -1,0 +1,5 @@
+apache-airflow-providers-postgres
+pandas
+scikit-learn
+requests
+psycopg2-binary

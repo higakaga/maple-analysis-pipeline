@@ -12,8 +12,11 @@ services:
         --firstname basic \
         --lastname Basic \
         --role Admin \
-        --email admin@example.com
+        --email admin@example.com || true
       "
+    restart: no
+    env_file:
+      - .env
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
       - AIRFLOW__CORE__LOAD_EXAMPLES=False

@@ -1,35 +1,27 @@
-services:
-  postgres-db:
-    image: postgres:13
-    environment:
-      - POSTGRES_USER=airflow
-      - POSTGRES_PASSWORD=airflow
-      - POSTGRES_DB=airflow
-    ports:
-      - "5432:5432"
-    healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U $$POSTGRES_USER -d $$POSTGRES_DB"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
+version: "3.8"
 
+services:
   airflow-init:
     build: .
-    entrypoint: "" 
-    command: bash -lc "airflow db migrate && \
-                      airflow users create \
-                        --username admin \
-                        --password admin \
-                        --firstname basic \
-                        --lastname Basic \
-                        --role Admin \
-                        --email admin@example.com"
-    depends_on:
-      postgres-db:
-        condition: service_healthy
+    entrypoint: ""
+    command: bash -lc "
+      airflow db migrate && \
+      airflow users create \
+        --username admin \
+        --password admin \
+        --firstname basic \
+        --lastname Basic \
+        --role Admin \
+        --email admin@example.com
+      "
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-db/airflow
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
 
   airflow-webserver:
     build: .
@@ -37,29 +29,32 @@ services:
     ports:
       - "8080:8080"
     depends_on:
-      postgres-db:
-        condition: service_healthy
       airflow-init:
         condition: service_completed_successfully
-    volumes:
-      - ./dags:/opt/airflow/dags
     environment:
       - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-db/airflow
       - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
+      - AIRFLOW__WEBSERVER__WORKERS=1
+    volumes:
+      - ./dags:/opt/airflow/dags
+      - ./logs:/opt/airflow/logs
+      - ./plugins:/opt/airflow/plugins
 
   airflow-scheduler:
     build: .
     command: scheduler
     depends_on:
-      postgres-db:
-        condition: service_healthy
       airflow-init:
         condition: service_completed_successfully
+    environment:
+      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
+      - AIRFLOW__CORE__LOAD_EXAMPLES=False
+      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=${AIRFLOW__DATABASE__SQL_ALCHEMY_CONN}
+      - AIRFLOW__CORE__PARALLELISM=2
+      - AIRFLOW__CORE__DAG_CONCURRENCY=1
+      - AIRFLOW__SCHEDULER__PARSING_PROCESSES=1
     volumes:
       - ./dags:/opt/airflow/dags
       - ./logs:/opt/airflow/logs
       - ./plugins:/opt/airflow/plugins
-    environment:
-      - AIRFLOW__CORE__EXECUTOR=LocalExecutor
-      - AIRFLOW__DATABASE__SQL_ALCHEMY_CONN=postgresql+psycopg2://airflow:airflow@postgres-db/airflow

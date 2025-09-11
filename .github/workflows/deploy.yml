@@ -1,0 +1,60 @@
+name: Deploy Airflow with CodeDeploy
+
+on:
+  push:
+    branches:
+      - main
+
+env:
+  AWS_REGION: ap-northeast-2
+  S3_BUCKET_NAME: maple-analysis-s3
+  ZIP_FILE_NAME: airflow-deploy.zip
+  APPLICATION_NAME: maple-analysis-app
+  DEPLOYMENT_GROUP_NAME: maple-analysis-deploy-group
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+
+    steps:
+      # 코드 가져오기
+      - name: Checkout Source Code
+        uses: actions/checkout@v4
+
+      # 배포용 디렉토리 생성
+      - name: Prepare package
+        run: |
+          mkdir -p deploy
+          cp -r dags deploy/
+          cp -r plugins deploy/
+          cp docker-compose.yml deploy/
+          cp Dockerfile deploy/
+          cp requirements.txt deploy/
+          cp appspec.yml deploy/
+          mkdir -p deploy/scripts
+          cp scripts/deploy.sh deploy/scripts/
+
+      # ZIP 파일 생성
+      - name: Create ZIP
+        run: zip -r $ZIP_FILE_NAME deploy
+        shell: bash
+
+      # AWS 인증 설정
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          aws-access-key-id: ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws-secret-access-key: ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws-region: ${{ env.AWS_REGION }}
+
+      # S3 업로드
+      - name: Upload package to S3
+        run: aws s3 cp $ZIP_FILE_NAME s3://$S3_BUCKET_NAME/deployments/$ZIP_FILE_NAME
+
+      # CodeDeploy 배포 실행
+      - name: CodeDeploy
+        run: |
+          aws deploy create-deployment \
+            --application-name $APPLICATION_NAME \
+            --deployment-group-name $DEPLOYMENT_GROUP_NAME \
+            --s3-location bucket=$S3_BUCKET_NAME,key=deployments/$ZIP_FILE_NAME,bundleType=zip

@@ -1,0 +1,10 @@
+version: 0.0
+os: linux
+files:
+  - source: /
+    destination: /home/ubuntu/airflow
+hooks:
+  AfterInstall:
+    - location: scripts/deploy.sh
+      timeout: 300
+      runas: ubuntu

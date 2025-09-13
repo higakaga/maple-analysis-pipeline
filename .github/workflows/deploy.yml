@@ -11,6 +11,7 @@ env:
   ZIP_FILE_NAME: airflow-deploy.zip
   APPLICATION_NAME: maple-analysis-app
   DEPLOYMENT_GROUP_NAME: maple-analysis-deploy-group
+  NEXON_API_KEY: ${{ secrets.NEXON_API_KEY }}
 
 jobs:
   deploy:

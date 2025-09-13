@@ -12,7 +12,20 @@ services:
         --firstname basic \
         --lastname Basic \
         --role Admin \
-        --email admin@example.com || true
+        --email admin@example.com || true && \
+
+      airflow connections add 'maple_postgres' \
+        --conn-type 'postgres' \
+        --conn-host ${RDS_HOST} \
+        --conn-login ${RDS_USER} \
+        --conn-password ${RDS_PASSWORD} \
+        --conn-schema ${RDS_DB} \
+        --conn-port 5432 || true && \
+
+      airflow variables set MAPLE_S3_BUCKET ${MAPLE_S3_BUCKET} && \
+      airflow variables set MAPLE_RDS_CONN_ID maple_postgres && \
+      airflow variables set MAPLE_MAX_QPS 400 && \
+      airflow variables set MAPLE_NUM_WORKERS 10
       "
     restart: no
     env_file:

@@ -4,7 +4,7 @@ import threading
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from airflow.models import BaseOperator
 from airflow.utils.decorators import apply_defaults
-from plugins.utils import (
+from utils import (
     requests_get_with_retry, s3_put_json, s3_put_jsonl,
     S3_BUCKET, MAX_QPS, NUM_WORKERS, SLEEP_INTERVAL
 )

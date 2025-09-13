@@ -6,7 +6,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from airflow.models import BaseOperator
 from airflow.utils.decorators import apply_defaults
 from airflow.providers.postgres.hooks.postgres import PostgresHook
-from plugins.utils import (
+from utils import (
     requests_get_with_retry, s3_put_json, s3_put_jsonl, s3_read_jsonl,
     BAN_NAMES, S3_BUCKET, POSTGRES_CONN_ID, MAX_QPS, NUM_WORKERS, SLEEP_INTERVAL
 )

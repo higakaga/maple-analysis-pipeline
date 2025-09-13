@@ -1,7 +1,7 @@
 import boto3
 from airflow.models import BaseOperator
 from airflow.utils.decorators import apply_defaults
-from plugins.utils import BAN_NAMES, is_challenger_world, s3_read_jsonl, s3_put_jsonl, S3_BUCKET
+from utils import BAN_NAMES, is_challenger_world, s3_read_jsonl, s3_put_jsonl, S3_BUCKET
 
 
 class MapleMergeDedupNamesOperator(BaseOperator):

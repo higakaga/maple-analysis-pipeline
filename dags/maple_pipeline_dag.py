@@ -4,10 +4,10 @@ from airflow.utils.dates import days_ago
 from airflow.decorators import task
 from airflow.utils import timezone
 
-from plugins.ranking_operator import MapleRankingToS3Operator
-from plugins.merge_operator import MapleMergeDedupNamesOperator
-from plugins.ocid_operator import MapleOcidOperator
-from plugins.character_operator import MapleCharacterBasicOperator
+from ranking_operator import MapleRankingToS3Operator
+from merge_operator import MapleMergeDedupNamesOperator
+from ocid_operator import MapleOcidOperator
+from character_operator import MapleCharacterBasicOperator
 
 default_args = {
     "owner": "airflow",

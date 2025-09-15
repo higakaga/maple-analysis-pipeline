@@ -1,72 +1,86 @@
 import os
-import boto3
-import threading
-from concurrent.futures import ThreadPoolExecutor, as_completed
+from typing import List, Dict, Any
+
 from airflow.models import BaseOperator
 from airflow.utils.decorators import apply_defaults
-from plugins.utils import (
-    requests_get_with_retry, s3_put_json, s3_put_jsonl,
-    S3_BUCKET, MAX_QPS, NUM_WORKERS, SLEEP_INTERVAL
-)
+from airflow.models import Variable
+
+from utils import requests_get_with_retry, s3_client, s3_put_json, s3_put_jsonl
 
 
 class MapleRankingToS3Operator(BaseOperator):
+    """
+    /maplestory/v1/ranking/overall 수집
+    - date: target_ymd (KST, 'YYYY-MM-DD')
+    - world_type: 0 먼저, 그 다음 1
+    - page=1부터 증가하다가 ranking 응답 내 character_level < 255 보이면 즉시 중단
+    - 원본 페이지 JSON은 raw/ 아래 저장
+    - character_name, world_name 등 추출한 이름 리스트를 staging/ 에 JSONL로 저장
+    """
     @apply_defaults
-    def __init__(self, target_ymd, world_type, max_pages=2000, *args, **kwargs):
+    def __init__(
+        self,
+        target_ymd: str,
+        world_type: int,
+        max_pages: int = 2000,
+        *args, **kwargs
+    ):
         super().__init__(*args, **kwargs)
-        self.s3_bucket = S3_BUCKET
         self.target_ymd = target_ymd
-        self.world_type = world_type
-        self.max_pages = max_pages
-        self.api_key = os.getenv("NEXON_API_KEY")
-        self.base_url = "https://open.api.nexon.com/maplestory/v1/ranking/overall"
+        self.world_type = int(world_type)
+        self.max_pages = int(max_pages)
 
-        self.names_rows = []
-        self.stop = False
-        self.lock = threading.Lock()
+    def execute(self, context):
+        api_key = os.getenv("NEXON_API_KEY")
+        if not api_key:
+            raise ValueError("NEXON_API_KEY 없음")
 
-    def _fetch_page(self, page, s3):
-        if self.stop:
-            return
+        bucket = Variable.get("MAPLE_S3_BUCKET")
+        s3 = s3_client()
 
-        params = {"date": self.target_ymd, "world_type": str(
-            self.world_type), "page": str(page)}
-        resp, err = requests_get_with_retry(
-            self.base_url, params, self.api_key)
-        if err or resp is None:
-            return
+        base_url = "https://open.api.nexon.com/maplestory/v1/ranking/overall"
 
-        data = resp.json()
-        s3_put_json(s3, self.s3_bucket,
-                    f"raw/ranking/{self.target_ymd}/world{self.world_type}/page={page}.json", data)
+        names: List[Dict[str, Any]] = []
+        stop = False
 
-        for row in data.get("ranking", []):
-            if row.get("character_level", 0) < 255:
-                self.stop = True
+        for page in range(1, self.max_pages + 1):
+            if stop:
                 break
-            with self.lock:
-                self.names_rows.append({
+
+            params = {
+                "date": self.target_ymd,
+                "world_type": str(self.world_type),
+                "page": str(page),
+            }
+            resp, err = requests_get_with_retry(base_url, params, api_key)
+            if err or not resp:
+                # 원본 실패 건은 로그만 남기고 스킵
+                self.log.warning(
+                    f"랭킹 정보: world{self.world_type} 실패, 페이지: {page}, 원인: {err}")
+                continue
+
+            data = resp.json()
+
+            # raw 저장
+            raw_key = f"raw/ranking/{self.target_ymd}/world{self.world_type}/page={page}.json"
+            s3_put_json(s3, bucket, raw_key, data)
+
+            # 필요한 필드 추출
+            for row in data.get("ranking", []):
+                level = row.get("character_level", 0)
+                if level < 255:
+                    stop = True
+                    break
+
+                names.append({
                     "character_name": row.get("character_name"),
                     "world_name": row.get("world_name"),
                     "ranking": row.get("ranking"),
-                    "character_level": row.get("character_level")
+                    "character_level": level,
                 })
 
-        import time
-        time.sleep(SLEEP_INTERVAL)
-
-    def execute(self, context):
-        if not self.api_key:
-            raise ValueError("NEXON_API_KEY env not set")
-
-        s3 = boto3.client("s3")
-        pages = list(range(1, self.max_pages + 1))
-
-        with ThreadPoolExecutor(max_workers=NUM_WORKERS) as executor:
-            futures = [executor.submit(self._fetch_page, p, s3) for p in pages]
-            for f in as_completed(futures):
-                pass
-
         stage_key = f"staging/ranking_names/{self.target_ymd}/world{self.world_type}.jsonl"
-        s3_put_jsonl(s3, self.s3_bucket, stage_key, self.names_rows)
+        s3_put_jsonl(s3, bucket, stage_key, names)
+        self.log.info(
+            f"랭킹 정보 수집 완료: world{self.world_type}, {len(names)}명 → s3://{bucket}/{stage_key}")
         return stage_key

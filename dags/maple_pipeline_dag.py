@@ -1,75 +1,62 @@
-from airflow import DAG
+# dags/maple_pipeline_dag.py
 from datetime import timedelta
-from airflow.utils.dates import days_ago
-from airflow.decorators import task
-from airflow.utils import timezone
+import pendulum
+from airflow import DAG
 
-from plugins.ranking_operator import MapleRankingToS3Operator
-from plugins.merge_operator import MapleMergeDedupNamesOperator
-from plugins.ocid_operator import MapleOcidOperator
-from plugins.character_operator import MapleCharacterBasicOperator
+from ranking_operator import MapleRankingToS3Operator
+from merge_names_operator import MapleMergeDedupNamesOperator
+from ocid_operator import MapleOcidOperator
+from basic_operator import MapleCharacterBasicOperator
+
+KST = pendulum.timezone("Asia/Seoul")
 
 default_args = {
     "owner": "airflow",
     "depends_on_past": False,
+    "email_on_failure": True,
+    "email_on_retry": False,
     "retries": 1,
-    "retry_delay": timedelta(minutes=3),
+    "retry_delay": timedelta(minutes=5),
 }
 
 with DAG(
     dag_id="maple_pipeline",
-    description="MapleStory pipeline: ranking -> id -> character/basic",
+    description="메분기 데이터 파이프라인",
     default_args=default_args,
-    schedule_interval="0 22 * * FRI",  # 금 오전 7시마다 실행
-    start_date=days_ago(1),
+    start_date=pendulum.datetime(2025, 1, 1, 0, 0, tz=KST),
+    schedule_interval="0 7 * * 5",  # 매주 금요일 07:00
     catchup=False,
-    tags=["maple", "nexon", "s3", "rds"],
+    tags=["maple", "etl", "nexon"],
+    timezone=KST,
 ) as dag:
-
-    # 실행일 기준 하루 전 날짜로 호출
-    @task
-    def compute_target_ymd(execution_date=None):
-        kst = timezone.convert_to_timezone(
-            execution_date or timezone.utcnow(), "Asia/Seoul")
-        target = (kst - timedelta(days=1)).date()
-        return target.strftime("%Y-%m-%d")
-
-    target_ymd = compute_target_ymd()
-
-    # 1. 일반 월드(월드타입 0) 랭킹 데이터 수집
-    ranking0 = MapleRankingToS3Operator(
+    fetch_ranking_world0 = MapleRankingToS3Operator(
         task_id="fetch_ranking_world0",
-        target_ymd=target_ymd,
+        target_ymd="{{ ds }}",
         world_type=0,
     )
-
-    # 2. 에오스/헬리오스(월드타입 1) 랭킹 데이터 수집
-    ranking1 = MapleRankingToS3Operator(
+    fetch_ranking_world1 = MapleRankingToS3Operator(
         task_id="fetch_ranking_world1",
-        target_ymd=target_ymd,
+        target_ymd="{{ ds }}",
         world_type=1,
     )
-
-    # 3. 랭킹 데이터 병합 + 중복 제거 (챌린저스 리프)
-    merge = MapleMergeDedupNamesOperator(
+    merge_dedup_names = MapleMergeDedupNamesOperator(
         task_id="merge_dedup_names",
-        target_ymd=target_ymd,
-        world0_key=ranking0.output,
-        world1_key=ranking1.output,
+        target_ymd="{{ ds }}",
+        input_keys=[
+            "staging/ranking_names/{{ ds }}/world0.jsonl",
+            "staging/ranking_names/{{ ds }}/world1.jsonl",
+        ],
     )
-
-    # 4. 캐릭터명 → ocid 매핑
-    ocid = MapleOcidOperator(
+    map_names_to_ocid = MapleOcidOperator(
         task_id="map_names_to_ocid",
-        target_ymd=target_ymd,
-        names_key=merge.output,
+        target_ymd="{{ ds }}",
+        input_key="staging/ranking_names/{{ ds }}/merged.jsonl",
     )
-
-    # 5. ocid → 캐릭터 기본 정보 조회 + RDS 적재
-    char_basic = MapleCharacterBasicOperator(
+    fetch_character_basic = MapleCharacterBasicOperator(
         task_id="fetch_character_basic",
-        target_ymd=target_ymd,
-        id_map_key=ocid.output,
+        target_ymd="{{ ds }}",
+        input_key="staging/ocids/{{ ds }}/ocids.jsonl",
     )
 
-    [ranking0, ranking1] >> merge >> ocid >> char_basic
+    [fetch_ranking_world0, fetch_ranking_world1] >> merge_dedup_names
+    merge_dedup_names >> map_names_to_ocid >> fetch_character_basic
